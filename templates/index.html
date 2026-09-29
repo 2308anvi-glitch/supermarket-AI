@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartStore AI | Inventory Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">S</span><div><h1>SmartStore <em>AI</em></h1><p>Inventory decision desk</p></div></div>
+      <div class="topbar-right"><span class="live-dot"></span><span>LOCAL WORKSPACE</span><time id="today"></time></div>
+    </header>
+
+    <section class="overview" aria-label="Inventory overview">
+      <div class="overview-intro"><p class="eyebrow">SUPPLY / DEMAND CONTROL</p><h2>Good stock moves<br>at the right time.</h2><p>Forecast, protect, and replenish your shelves with one clear view of inventory risk.</p></div>
+      <div class="summary-grid">
+        <div class="summary"><span>SKU COUNT</span><strong id="sku-count">0</strong><small>items monitored</small></div>
+        <div class="summary"><span>REORDER NOW</span><strong id="reorder-count">0</strong><small>needs action</small></div>
+        <div class="summary"><span>SPOILAGE WATCH</span><strong id="expiry-count">0</strong><small>3 days or less</small></div>
+        <div class="summary summary-alert"><span>CRITICAL COVER</span><strong id="critical-count">0</strong><small>under 1.5 days</small></div>
+      </div>
+    </section>
+
+    <section class="scenario-panel" aria-labelledby="scenario-title">
+      <div class="section-heading"><div><p class="eyebrow">MODEL INPUTS</p><h2 id="scenario-title">What-if demand</h2></div><span class="scenario-note">Estimates update as you adjust the week ahead.</span></div>
+      <div class="scenario-controls">
+        <label class="slider-control">Promotion uplift <output id="promo-output">0%</output><input id="promo" type="range" min="0" max="50" step="5" value="0"><span class="range-labels"><span>0%</span><span>50%</span></span></label>
+        <label class="select-control">Local weather<select id="weather"><option value="none">Typical conditions</option><option value="rain">Rain</option><option value="heatwave">Heatwave</option></select></label>
+        <label class="switch-control"><input id="weekend" type="checkbox"><span class="switch"></span><span>Weekend traffic</span></label>
+        <label class="switch-control"><input id="holiday" type="checkbox"><span class="switch"></span><span>Holiday rush</span></label>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="tools-panel">
+        <div class="section-heading compact"><div><p class="eyebrow">INVENTORY TOOLS</p><h2>Load & act</h2></div></div>
+        <form id="upload-form">
+          <label class="file-picker"> <span>＋</span><span><strong>Import inventory CSV</strong><small>Choose a local file</small></span><input id="file" name="file" type="file" accept=".csv,text/csv"></label>
+          <button class="button button-dark button-wide" type="submit">Analyse file <span>↗</span></button>
+        </form>
+        <a class="sample-link" href="/static/sample_inventory.csv" download>Download sample inventory <span>↓</span></a>
+        <div class="tool-divider"></div>
+        <button class="button button-outline button-wide" id="export-action" type="button">Export action plan <span>↓</span></button>
+        <button class="button button-outline button-wide" id="export-po" type="button">Generate purchase order <span>↓</span></button>
+        <p class="fine-print">PO export is a CSV draft. Confirm supplier and delivery details before sending.</p>
+        <div class="alert-setting"><div><strong>Critical stock alerts</strong><small id="alert-status">Checking webhook setup…</small></div><span class="alert-icon">!</span></div>
+        <div id="message" role="status" aria-live="polite"></div>
+      </aside>
+
+      <section class="inventory-panel" aria-labelledby="inventory-title">
+        <div class="inventory-heading"><div><p class="eyebrow">LIVE RECOMMENDATIONS</p><h2 id="inventory-title">Inventory <span id="visible-count">0</span></h2></div><div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Search products" aria-label="Search products"></div></div>
+        <div class="filters" role="group" aria-label="Filter inventory">
+          <label><span>Risk</span><select id="status-filter"><option value="all">All statuses</option><option>Understock risk</option><option>Healthy</option><option>Overstock risk</option><option>Wastage risk</option></select></label>
+          <label><span>Category</span><select id="category-filter"><option value="all">All categories</option></select></label>
+          <span class="filter-hint">Select a product trend to inspect demand</span>
+        </div>
+        <div class="inventory-list" id="inventory-list"></div>
+        <div class="empty-state" id="empty-state" hidden>No products match these filters.</div>
+      </section>
+    </section>
+    <footer><span>SMARTSTORE AI / DECISION SUPPORT</span><span>Forecast factors are estimates. Validate quantities against supplier terms.</span></footer>
+  </main>
+
+  <script>
+    const initialItems = {{ items|tojson }};
+    let allItems = initialItems;
+    let visibleItems = initialItems;
+    let webhookConfigured = false;
+    let alertSignature = '';
+    const list = document.querySelector('#inventory-list');
+    const message = document.querySelector('#message');
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const safeId = value => btoa(unescape(encodeURIComponent(String(value)))).replace(/[^a-zA-Z0-9]/g, '');
+    document.querySelector('#today').textContent = new Intl.DateTimeFormat('en', {dateStyle:'medium'}).format(new Date());
+
+    function render() {
+      const search = document.querySelector('#search').value.trim().toLowerCase();
+      const status = document.querySelector('#status-filter').value;
+      const category = document.querySelector('#category-filter').value;
+      visibleItems = allItems.filter(item => (!search || item.product.toLowerCase().includes(search)) && (status === 'all' || item.status === status) && (category === 'all' || item.category === category));
+      list.innerHTML = visibleItems.map(item => {
+        const id = allItems.indexOf(item);
+        const expiryClass = item.days_to_expiry <= 3 ? 'expiry-urgent' : item.days_to_expiry <= 7 ? 'expiry-soon' : '';
+        const expiryLabel = item.expiry_date ? `${item.days_to_expiry} days to expire` : `${item.days_to_expiry} shelf-life days est.`;
+        return `<article class="inventory-row">
+          <div class="product-cell"><button class="product-name" data-trend="${id}" aria-expanded="false">${esc(item.product)} <span>↗</span></button><div class="product-tags"><span class="category-tag">${esc(item.category)}</span><span class="expiry-tag ${expiryClass}">${esc(expiryLabel)}</span>${item.expiry_date ? '<span class="batch-tag">BATCH DATE</span>' : ''}</div></div>
+          <span class="status-tag ${item.status.toLowerCase().replaceAll(' ','-')}">${esc(item.status)}</span>
+          <div class="row-metrics"><span>ON HAND<strong>${esc(item.stock)}</strong></span><span>DAILY FCST<strong>${esc(item.forecast)}</strong></span><span>COVER<strong>${esc(item.days_cover)}d</strong></span><span>REORDER<strong>${esc(item.reorder)}</strong></span></div>
+          <div class="row-action">${item.markdown_percent ? `<span class="markdown-tag">${item.markdown_percent}% markdown</span>` : '<span class="no-markdown">Price steady</span>'}<span class="lead-note">${esc(item.lead_days)}d supplier lead</span></div>
+          <div class="trend-panel" id="trend-${id}" hidden><div class="trend-title"><strong>Demand trend · ${esc(item.product)}</strong><span>Past ${item.history.length} days vs next 7-day estimate</span></div><canvas data-chart="${id}" aria-label="Historical demand and projected demand for ${esc(item.product)}"></canvas><div class="chart-legend"><span><i class="legend-history"></i>${esc(item.history_source === 'Actual sales history' ? 'Actual recent sales' : 'Illustrative baseline')}</span><span><i class="legend-forecast"></i>Forecast</span></div></div>
+        </article>`;
+      }).join('');
+      document.querySelector('#visible-count').textContent = visibleItems.length;
+      document.querySelector('#empty-state').hidden = visibleItems.length !== 0;
+      document.querySelector('#sku-count').textContent = allItems.length;
+      document.querySelector('#reorder-count').textContent = allItems.filter(item => item.reorder > 0).length;
+      document.querySelector('#expiry-count').textContent = allItems.filter(item => item.days_to_expiry <= 3).length;
+      document.querySelector('#critical-count').textContent = allItems.filter(item => item.days_cover < 1.5).length;
+      document.querySelectorAll('[data-trend]').forEach(button => button.addEventListener('click', () => toggleTrend(button)));
+      document.querySelectorAll('.trend-panel:not([hidden]) canvas').forEach(canvas => drawTrend(canvas, allItems[Number(canvas.dataset.chart)]));
+      sendCriticalAlerts();
+    }
+
+    function drawTrend(canvas, item) {
+      if (!item) return;
+      const width = canvas.clientWidth || 560, height = 152, ratio = window.devicePixelRatio || 1;
+      canvas.width = width * ratio; canvas.height = height * ratio; canvas.style.height = `${height}px`;
+      const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height);
+      const values = [...(item.history || []), ...(item.projection || [])];
+      const max = Math.max(...values, 1) * 1.15, pad = 16;
+      const point = (value, index) => ({x:pad + index * (width - pad * 2) / (values.length - 1), y:height - pad - value / max * (height - pad * 2)});
+      ctx.strokeStyle = '#d9e1dc'; ctx.lineWidth = 1;
+      for (let i = 0; i < 3; i++) { const y = pad + i * (height - pad * 2) / 2; ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(width-pad,y); ctx.stroke(); }
+      const line = (start, end, color, dash=[]) => { ctx.beginPath(); ctx.setLineDash(dash); ctx.strokeStyle = color; ctx.lineWidth = 2.5; for (let i=start;i<end;i++){const p=point(values[i],i); i===start?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);} ctx.stroke(); ctx.setLineDash([]); };
+      const historyLength = item.history.length;
+      line(0, historyLength, '#177957'); line(historyLength - 1, values.length, '#e46d4d', [5,4]);
+      ctx.fillStyle='#7b8981'; ctx.font='11px Manrope'; ctx.fillText('7 days ago', pad, height-1); ctx.fillText('today', width/2-13, height-1); ctx.fillText('+7 days', width-pad-39, height-1);
+    }
+    function toggleTrend(button) {
+      const panel = document.querySelector(`#trend-${button.dataset.trend}`);
+      panel.hidden = !panel.hidden; button.setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) drawTrend(panel.querySelector('canvas'), allItems[Number(button.dataset.trend)]);
+    }
+    function populateCategories() {
+      const select = document.querySelector('#category-filter');
+      const selected = select.value;
+      select.innerHTML = '<option value="all">All categories</option>' + [...new Set(allItems.map(item => item.category))].sort().map(category => `<option>${esc(category)}</option>`).join('');
+      select.value = [...select.options].some(option => option.value === selected) ? selected : 'all';
+    }
+    function currentScenario() {
+      return {weekend:document.querySelector('#weekend').checked, holiday:document.querySelector('#holiday').checked, promo_percent:document.querySelector('#promo').value, weather:document.querySelector('#weather').value};
+    }
+    let scenarioTimer;
+    async function updateScenario() {
+      document.querySelector('#promo-output').textContent = `${document.querySelector('#promo').value}%`;
+      clearTimeout(scenarioTimer);
+      scenarioTimer = setTimeout(async () => {
+        const response = await fetch('/scenario', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:allItems, scenario:currentScenario()})});
+        const data = await response.json();
+        if (!response.ok) { message.textContent = data.error || 'Could not update forecast.'; return; }
+        allItems = data.items; render();
+      }, 180);
+    }
+    document.querySelectorAll('#promo, #weather, #weekend, #holiday').forEach(control => control.addEventListener('input', updateScenario));
+    document.querySelectorAll('#status-filter, #category-filter').forEach(control => control.addEventListener('change', render));
+    document.querySelector('#search').addEventListener('input', render);
+
+    document.querySelector('#upload-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      if (!document.querySelector('#file').files.length) { message.textContent = 'Choose an inventory CSV file first.'; return; }
+      message.textContent = 'Analysing inventory…';
+      const form = new FormData(event.currentTarget);
+      Object.entries(currentScenario()).forEach(([key,value]) => form.set(key, value));
+      const response = await fetch('/analyse', {method:'POST', body:form}); const data = await response.json();
+      if (!response.ok) { message.textContent = data.error || 'Could not analyse this file.'; return; }
+      allItems = data.items; populateCategories(); render(); message.textContent = `Analysed ${allItems.length} products.`;
+    });
+    async function downloadCsv(path, name) {
+      const response = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:allItems})});
+      if (!response.ok) { message.textContent = 'Export failed. Please try again.'; return; }
+      const blob = await response.blob(), link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); URL.revokeObjectURL(link.href);
+      message.textContent = `${name} downloaded.`;
+    }
+    document.querySelector('#export-action').addEventListener('click', () => downloadCsv('/export/action-plan','smartstore-action-plan.csv'));
+    document.querySelector('#export-po').addEventListener('click', () => downloadCsv('/export/purchase-order','smartstore-purchase-order.csv'));
+    async function sendCriticalAlerts() {
+      const critical = allItems.filter(item => item.days_cover < 1.5);
+      const signature = critical.map(item => item.product).join('|');
+      if (!signature) { alertSignature = ''; return; }
+      if (signature === alertSignature) return;
+      alertSignature = signature;
+      const response = await fetch('/alerts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:critical})});
+      const result = await response.json(); webhookConfigured = result.configured;
+      document.querySelector('#alert-status').textContent = result.configured ? (result.sent ? 'Critical stock alert sent' : 'Webhook configured') : 'Set SMARTSTORE_ALERT_WEBHOOK_URL to enable';
+    }
+    populateCategories(); render();
+  </script>
+</body>
+</html>
