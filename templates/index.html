@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/intelligence.css">
+  <link rel="stylesheet" href="/static/review-gate.css">
 </head>
 <body>
   <main class="shell">
@@ -52,16 +54,49 @@
         <div id="message" role="status" aria-live="polite"></div>
       </aside>
 
-      <section class="inventory-panel" aria-labelledby="inventory-title">
-        <div class="inventory-heading"><div><p class="eyebrow">LIVE RECOMMENDATIONS</p><h2 id="inventory-title">Inventory <span id="visible-count">0</span></h2></div><div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Search products" aria-label="Search products"></div></div>
-        <div class="filters" role="group" aria-label="Filter inventory">
-          <label><span>Risk</span><select id="status-filter"><option value="all">All statuses</option><option>Understock risk</option><option>Healthy</option><option>Overstock risk</option><option>Wastage risk</option></select></label>
-          <label><span>Category</span><select id="category-filter"><option value="all">All categories</option></select></label>
-          <span class="filter-hint">Select a product trend to inspect demand</span>
-        </div>
-        <div class="inventory-list" id="inventory-list"></div>
-        <div class="empty-state" id="empty-state" hidden>No products match these filters.</div>
-      </section>
+      <div class="main-panel">
+        <nav class="view-tabs" role="tablist" aria-label="Inventory intelligence views">
+          <button class="view-tab active" type="button" role="tab" aria-selected="true" data-view="inventory-view">Inventory</button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="demand-view">Demand signals <span id="inquiry-total">0</span></button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="anomaly-view">Anomaly review <span id="anomaly-total">0</span></button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="cluster-view">Product groups</button>
+          <button class="view-tab" type="button" role="tab" aria-selected="false" data-view="policy-view">Policy lab</button>
+        </nav>
+        <section class="view-content" id="inventory-view" role="tabpanel" aria-labelledby="inventory-title">
+          <section class="inventory-panel" aria-labelledby="inventory-title">
+            <div class="inventory-heading"><div><p class="eyebrow">LIVE RECOMMENDATIONS</p><h2 id="inventory-title">Inventory <span id="visible-count">0</span></h2></div><div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Search products" aria-label="Search products"></div></div>
+            <div class="filters" role="group" aria-label="Filter inventory">
+              <label><span>Risk</span><select id="status-filter"><option value="all">All statuses</option><option>Understock risk</option><option>Healthy</option><option>Overstock risk</option><option>Wastage risk</option></select></label>
+              <label><span>Category</span><select id="category-filter"><option value="all">All categories</option></select></label>
+              <span class="filter-hint">Select a product trend to inspect demand</span>
+            </div>
+            <div class="forecast-gate" id="forecast-gate" hidden><div><strong>Review required before acting on forecasts</strong><p><span id="pending-anomaly-count">0</span> flagged inventory record(s) need a manager decision.</p></div><button class="button button-outline" id="open-anomaly-review" type="button">Open anomaly review <span>↗</span></button></div>
+            <div class="inventory-list" id="inventory-list"></div>
+            <div class="empty-state" id="empty-state" hidden>No products match these filters.</div>
+          </section>
+        </section>
+        <section class="view-content intelligence-view" id="demand-view" role="tabpanel" hidden>
+          <div class="view-heading"><div><p class="eyebrow">VOICE OF CUSTOMER</p><h2>Demand signals</h2><p>Paste searches, chat requests, or complaint excerpts. Matching product mentions add a bounded forecast uplift.</p></div><span class="model-chip">Rule-based text matching</span></div>
+          <label class="inquiry-label" for="inquiry-input">Customer inquiries <span>one inquiry per line</span></label>
+          <textarea id="inquiry-input" rows="5" placeholder="lactose-free milk&#10;Customers asking for oat milk&#10;Need unsweetened orange juice"></textarea>
+          <div class="form-actions"><button class="button button-dark" id="apply-inquiries" type="button">Apply demand signals <span>↗</span></button><button class="text-button" id="clear-inquiries" type="button">Clear</button><span id="inquiry-status" class="inline-status"></span></div>
+          <div class="signal-list" id="signal-list"></div>
+        </section>
+        <section class="view-content intelligence-view" id="anomaly-view" role="tabpanel" hidden>
+          <div class="view-heading"><div><p class="eyebrow">DATA QUALITY GATE</p><h2>Anomaly review</h2><p>Review flagged inventory records before acting on recommendations.</p></div><span class="model-chip" id="anomaly-model">Loading detector…</span></div>
+          <div class="review-list" id="anomaly-list"></div>
+          <div class="empty-state" id="anomaly-empty" hidden>No suspicious inventory records are flagged.</div>
+        </section>
+        <section class="view-content intelligence-view" id="cluster-view" role="tabpanel" hidden>
+          <div class="view-heading"><div><p class="eyebrow">BEHAVIOR SEGMENTS</p><h2>Product groups</h2><p>Groups compare sales velocity, variation, recent momentum, and promotion responsiveness.</p></div><span class="model-chip" id="cluster-model">Loading clusterer…</span></div>
+          <div class="cluster-grid" id="cluster-list"></div>
+        </section>
+        <section class="view-content intelligence-view" id="policy-view" role="tabpanel" hidden>
+          <div class="view-heading"><div><p class="eyebrow">MANAGER FEEDBACK LOOP</p><h2>Policy lab</h2><p>Compare rule baseline with the feedback-adjusted suggestion. New stores start at the baseline; the suggestion only adapts after repeated decisions.</p></div><span class="model-chip" id="policy-model">Cold start</span></div>
+          <div class="policy-list" id="policy-list"></div>
+          <div class="feedback-history"><div class="history-heading"><h3>Recent manager decisions</h3><span>Local history</span></div><div id="feedback-list"></div></div>
+        </section>
+      </div>
     </section>
     <footer><span>SMARTSTORE AI / DECISION SUPPORT</span><span>Forecast factors are estimates. Validate quantities against supplier terms.</span></footer>
   </main>
@@ -140,7 +175,7 @@
       document.querySelector('#promo-output').textContent = `${document.querySelector('#promo').value}%`;
       clearTimeout(scenarioTimer);
       scenarioTimer = setTimeout(async () => {
-        const response = await fetch('/scenario', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:allItems, scenario:currentScenario()})});
+        const response = await fetch('/scenario', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({items:allItems, scenario:currentScenario(), inquiries:window.smartstoreInquiries || []})});
         const data = await response.json();
         if (!response.ok) { message.textContent = data.error || 'Could not update forecast.'; return; }
         allItems = data.items; render();
@@ -156,6 +191,7 @@
       message.textContent = 'Analysing inventory…';
       const form = new FormData(event.currentTarget);
       Object.entries(currentScenario()).forEach(([key,value]) => form.set(key, value));
+      form.set('customer_inquiries', (window.smartstoreInquiries || []).join('\n'));
       const response = await fetch('/analyse', {method:'POST', body:form}); const data = await response.json();
       if (!response.ok) { message.textContent = data.error || 'Could not analyse this file.'; return; }
       allItems = data.items; populateCategories(); render(); message.textContent = `Analysed ${allItems.length} products.`;
@@ -180,5 +216,6 @@
     }
     populateCategories(); render();
   </script>
+  <script src="/static/intelligence.js"></script>
 </body>
 </html>

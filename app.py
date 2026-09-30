@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, Response
 import csv, io, json, math, os, urllib.request
 from datetime import date, datetime
+from smartstore_insights import enrich_inventory, log_recommendation, recent_feedback, review_anomaly
 
 app = Flask(__name__)
 
@@ -40,7 +41,7 @@ def optimise(row, scenario=None):
     # Scenario factors are transparent estimates, not a trained demand model.
     factor = ((1 + discount / 200.0) * (1.18 if scenario.get('weekend') else 1.0)
               * (1 + promo / 100.0) * (1.25 if scenario.get('holiday') else 1.0)
-              * weather_factor)
+              * weather_factor * (1 + max(0, min(0.5, float(scenario.get('inquiry_uplift', 0))))))
     forecast=sales*factor
     safety=max(1,forecast*0.35)
     target=forecast*(lead+2)+safety
@@ -90,7 +91,8 @@ def csv_response(rows, columns, filename):
 
 @app.route('/')
 def index():
-    return render_template('index.html', items=[optimise(x) for x in SAMPLE])
+    analysis = enrich_inventory(SAMPLE)
+    return render_template('index.html', items=analysis['items'], anomaly_model=analysis['anomaly_model'], cluster_model=analysis['cluster_model'])
 
 @app.route('/analyse', methods=['POST'])
 def analyse():
@@ -107,7 +109,9 @@ def analyse():
         required={'product','stock','daily_sales','lead_days','shelf_days','price','discount'}
         if not rows or not required.issubset(rows[0].keys()):
             return jsonify({'error':'CSV columns must be: '+', '.join(sorted(required))}),400
-        return jsonify({'items':[optimise(r,scenario) for r in rows]})
+        inquiries = request.form.get('customer_inquiries', '').splitlines()
+        analysis = enrich_inventory(rows, scenario, inquiries)
+        return jsonify(analysis)
     except Exception as e:
         return jsonify({'error':'Could not read CSV: '+str(e)}),400
 
@@ -116,10 +120,30 @@ def analyse():
 def scenario_forecast():
     payload = request.get_json(force=True)
     try:
-        items = [optimise(row, payload.get('scenario', {})) for row in payload.get('items', [])]
-        return jsonify({'items': items})
+        return jsonify(enrich_inventory(payload.get('items', []), payload.get('scenario', {}), payload.get('inquiries', [])))
     except (TypeError, ValueError) as e:
         return jsonify({'error': f'Invalid inventory or scenario value: {e}'}), 400
+
+
+@app.route('/review/anomaly', methods=['POST'])
+def save_anomaly_review():
+    try:
+        return jsonify(review_anomaly(request.get_json(force=True)))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/review/recommendation', methods=['POST'])
+def save_recommendation_feedback():
+    try:
+        return jsonify(log_recommendation(request.get_json(force=True)))
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/review/history')
+def recommendation_history():
+    return jsonify({'items': recent_feedback()})
 
 
 @app.route('/export/action-plan', methods=['POST'])

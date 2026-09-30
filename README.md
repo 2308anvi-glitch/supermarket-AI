@@ -13,6 +13,10 @@ A working prototype for supermarket/kirana inventory decision support. It foreca
 - Weekend, promotion, holiday and local weather scenario factors
 - Demand trend chart using uploaded history when available
 - Optional critical-stock webhook alerts
+- Customer-language demand signal matching for inquiries and complaints
+- Anomaly review queue with persisted manager decisions
+- Product behavior groups using K-Means when the optional ML dependency is available
+- Reorder comparison with manager acceptance and override history
 - Perishable stock cap using shelf-life horizon
 - `/health` endpoint
 
@@ -26,6 +30,8 @@ python -m venv .venv
 source .venv/bin/activate
 # Windows PowerShell: .venv\\Scripts\\Activate.ps1
 pip install -r requirements.txt
+# Optional: Isolation Forest and K-Means model support (standard CPython recommended)
+pip install -r requirements-ml.txt
 python app.py
 ```
 Open `http://127.0.0.1:5000`.
@@ -43,12 +49,20 @@ A ready-to-use file is included at `static/sample_inventory.csv` and can also be
 
 To send critical-stock notifications to a compatible webhook, set `SMARTSTORE_ALERT_WEBHOOK_URL` in the environment before starting the app. Alerts are sent when projected stock cover is below 1.5 days. With no webhook configured, the dashboard remains fully usable and displays that alerts are disabled.
 
+## Intelligence views
+The Demand Signals view accepts one customer inquiry per line. Product-name/category matches add 10% demand per matched inquiry, capped at 50%; unmatched terms are shown as potential assortment gaps. Anomaly Review applies input validations and, when scikit-learn is installed and there are at least five rows, Isolation Forest. Product Groups uses K-Means with three or more rows; otherwise both features clearly identify their rule-based or insufficient-data mode.
+
+Policy Lab records accepted recommendations and manual reorder quantities in `instance/manager_feedback.sqlite3`. With fewer than three comparable manager decisions, the suggested quantity stays at the rule baseline. After that, the displayed suggestion blends 70% baseline with 30% recent manager quantities for the same category/status. This is a feedback heuristic, not a trained reinforcement-learning or Deep Q-Network model. Data remains local to this app instance.
+
 ## Project structure
 - `app.py` - Flask server and optimisation logic
+- `smartstore_insights.py` - inquiry matching, anomaly/grouping logic and feedback persistence
 - `templates/index.html` - dashboard UI
 - `static/style.css` - responsive styling
+- `static/intelligence.js` and `static/intelligence.css` - intelligence view interactions and styling
 - `static/sample_inventory.csv` - sample data
 - `requirements.txt` - Python dependency
+- `requirements-ml.txt` - optional Isolation Forest and K-Means dependency
 
 ## Disclaimer
 Use as decision support only. Validate forecasts and purchase quantities against real store data, supplier constraints and business rules before production use.
